@@ -1,0 +1,89 @@
+name: Daily Briefing (ICT Schedule)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Múi giờ: Vietnam (ICT = UTC+7)
+# Chuyển đổi ICT → UTC cho cron:
+#   03:50 ICT  =  20:50 UTC (ngày hôm trước)  → cron: '50 20 * * *'
+#   09:00 ICT  =  02:00 UTC                    → cron: '0 2 * * *'
+#   14:10 ICT  =  07:10 UTC                    → cron: '10 7 * * *'
+#   19:20 ICT  =  12:20 UTC                    → cron: '20 12 * * *'
+#
+# Lưu ý: GitHub Actions cron có thể delay ~5–15 phút khi hệ thống bận.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  schedule:
+    - cron: '50 20 * * *'   # 03:50 ICT → thời tiết Hà Nội hôm nay
+    - cron: '0 2 * * *'     # 09:00 ICT → giá vàng SJC
+    - cron: '10 7 * * *'    # 14:10 ICT → tỷ giá USD/VNĐ
+    - cron: '20 12 * * *'   # 19:20 ICT → dự báo thời tiết ngày mai
+
+  # Cho phép chạy thủ công để test
+  workflow_dispatch:
+    inputs:
+      task:
+        description: 'Task để chạy thủ công (để trống = tự detect từ giờ UTC)'
+        required: false
+        default: ''
+        type: choice
+        options:
+          - ''
+          - weather_today
+          - gold_price
+          - usd_rate
+          - weather_tomorrow
+
+jobs:
+  briefing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install anthropic requests
+
+      - name: Resolve task from schedule or manual input
+        id: resolve
+        shell: bash
+        run: |
+          OVERRIDE="${{ inputs.task }}"
+
+          if [[ -n "$OVERRIDE" ]]; then
+            # Manual run
+            echo "task=$OVERRIDE" >> "$GITHUB_OUTPUT"
+            echo "→ Manual override: $OVERRIDE"
+          else
+            # Auto-detect từ UTC hour hiện tại
+            H=$(date -u +"%H")
+            echo "→ Current UTC hour: $H"
+
+            case "$H" in
+              "20"|"21")  TASK="weather_today"    ;;   # 03:50–04:59 ICT
+              "02"|"03")  TASK="gold_price"        ;;   # 09:00–10:59 ICT
+              "07"|"08")  TASK="usd_rate"          ;;   # 14:10–15:59 ICT
+              "12"|"13")  TASK="weather_tomorrow"  ;;   # 19:20–20:59 ICT
+              *)
+                echo "⚠️ Unexpected UTC hour $H — fallback: weather_today"
+                TASK="weather_today"
+                ;;
+            esac
+
+            echo "task=$TASK" >> "$GITHUB_OUTPUT"
+            echo "→ Auto-resolved: $TASK"
+          fi
+
+      - name: Run daily briefing
+        run: python scripts/daily_briefing.py "${{ steps.resolve.outputs.task }}"
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
