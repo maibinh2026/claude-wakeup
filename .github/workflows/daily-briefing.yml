@@ -1,28 +1,24 @@
 name: Daily Briefing (ICT Schedule)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Múi giờ: Vietnam (ICT = UTC+7)
-# Chuyển đổi ICT → UTC cho cron:
-#   03:50 ICT  =  20:50 UTC (ngày hôm trước)  → cron: '50 20 * * *'
-#   09:00 ICT  =  02:00 UTC                    → cron: '0 2 * * *'
-#   14:10 ICT  =  07:10 UTC                    → cron: '10 7 * * *'
-#   19:20 ICT  =  12:20 UTC                    → cron: '20 12 * * *'
-#
-# Lưu ý: GitHub Actions cron có thể delay ~5–15 phút khi hệ thống bận.
-# ─────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────
+# Lịch tự động (ICT = UTC+7):
+#   03:50 ICT → 20:50 UTC   thời tiết hôm nay
+#   09:00 ICT → 02:00 UTC   giá vàng SJC
+#   14:10 ICT → 07:10 UTC   tỷ giá USD/VNĐ
+#   19:20 ICT → 12:20 UTC   dự báo thời tiết ngày mai
+# ─────────────────────────────────────────────────────────────────
 
 on:
   schedule:
-    - cron: '50 20 * * *'   # 03:50 ICT → thời tiết Hà Nội hôm nay
-    - cron: '0 2 * * *'     # 09:00 ICT → giá vàng SJC
-    - cron: '10 7 * * *'    # 14:10 ICT → tỷ giá USD/VNĐ
-    - cron: '20 12 * * *'   # 19:20 ICT → dự báo thời tiết ngày mai
+    - cron: '50 20 * * *'   # 03:50 ICT
+    - cron: '0 2 * * *'     # 09:00 ICT
+    - cron: '10 7 * * *'    # 14:10 ICT
+    - cron: '20 12 * * *'   # 19:20 ICT
 
-  # Cho phép chạy thủ công để test
   workflow_dispatch:
     inputs:
       task:
-        description: 'Task để chạy thủ công (để trống = tự detect từ giờ UTC)'
+        description: 'Chọn task (để trống = tự detect từ giờ UTC hiện tại)'
         required: false
         default: ''
         type: choice
@@ -37,6 +33,9 @@ jobs:
   briefing:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    env:
+      # FIX: Node.js 24 bắt buộc từ 16/6/2026 trên GitHub Actions runners
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
     steps:
       - name: Checkout repository
@@ -49,7 +48,7 @@ jobs:
           cache: 'pip'
 
       - name: Install dependencies
-        run: pip install anthropic requests
+        run: pip install --upgrade anthropic requests
 
       - name: Resolve task from schedule or manual input
         id: resolve
@@ -58,27 +57,23 @@ jobs:
           OVERRIDE="${{ inputs.task }}"
 
           if [[ -n "$OVERRIDE" ]]; then
-            # Manual run
             echo "task=$OVERRIDE" >> "$GITHUB_OUTPUT"
             echo "→ Manual override: $OVERRIDE"
           else
-            # Auto-detect từ UTC hour hiện tại
             H=$(date -u +"%H")
-            echo "→ Current UTC hour: $H"
-
+            echo "→ UTC hour hiện tại: $H"
             case "$H" in
-              "20"|"21")  TASK="weather_today"    ;;   # 03:50–04:59 ICT
-              "02"|"03")  TASK="gold_price"        ;;   # 09:00–10:59 ICT
-              "07"|"08")  TASK="usd_rate"          ;;   # 14:10–15:59 ICT
-              "12"|"13")  TASK="weather_tomorrow"  ;;   # 19:20–20:59 ICT
+              "20"|"21") TASK="weather_today"    ;;   # 03:50–04:59 ICT
+              "02"|"03") TASK="gold_price"        ;;   # 09:00–10:59 ICT
+              "07"|"08") TASK="usd_rate"          ;;   # 14:10–15:59 ICT
+              "12"|"13") TASK="weather_tomorrow"  ;;   # 19:20–20:59 ICT
               *)
-                echo "⚠️ Unexpected UTC hour $H — fallback: weather_today"
+                echo "⚠️ UTC hour $H không khớp schedule — fallback: weather_today"
                 TASK="weather_today"
                 ;;
             esac
-
             echo "task=$TASK" >> "$GITHUB_OUTPUT"
-            echo "→ Auto-resolved: $TASK"
+            echo "→ Task đã resolve: $TASK"
           fi
 
       - name: Run daily briefing
